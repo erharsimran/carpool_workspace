@@ -5,7 +5,7 @@ from django.contrib.gis.geos import Point
 from django.contrib.gis.measure import D
 from django.db.models import Q
 from ninja import Router
-
+from typing import List, Optional
 from .models import Trip, TripStop
 from .schemas import TripCreateSchema, TripOutSchema
 from .services.osrm import fetch_route_geometry
@@ -65,37 +65,36 @@ def create_trip(request, payload: TripCreateSchema):
 def list_trips(request):
     return Trip.objects.filter(status="scheduled").order_by("departure_time")
 
-
 @router.get("/search", response=List[TripOutSchema])
 def search_trips(
     request,
-    origin_lat: float,
-    origin_lng: float,
-    dest_lat: float,
-    dest_lng: float,
+    origin_lat: Optional[float] = None,
+    origin_lng: Optional[float] = None,
+    dest_lat: Optional[float] = None,
+    dest_lng: Optional[float] = None,
     radius_km: float = 15.0,
     ):
-    rider_origin = Point(origin_lng, origin_lat, srid=4326)
-    rider_destination = Point(dest_lng, dest_lat, srid=4326)
+    matched_trips = Trip.objects.filter(
+        status="scheduled",
+        available_seats__gt=0,
+    )
+
     search_distance = D(km=radius_km)
 
-    # Spatial query: origin or intermediate stop within radius of pickup,
-    # AND destination or intermediate stop within radius of dropoff.
-    matched_trips = (
-        Trip.objects.filter(
-            status="scheduled",
-            available_seats__gt=0,
-        )
-        .filter(
+    # 1. Filter by Origin (pickup stop or trip origin within radius)
+    if origin_lat is not None and origin_lng is not None:
+        rider_origin = Point(origin_lng, origin_lat, srid=4326)
+        matched_trips = matched_trips.filter(
             Q(origin_coords__dwithin=(rider_origin, search_distance))
             | Q(stops__location__dwithin=(rider_origin, search_distance))
         )
-        .filter(
+
+    # 2. Filter by Destination (dropoff stop or trip destination within radius)
+    if dest_lat is not None and dest_lng is not None:
+        rider_destination = Point(dest_lng, dest_lat, srid=4326)
+        matched_trips = matched_trips.filter(
             Q(destination_coords__dwithin=(rider_destination, search_distance))
             | Q(stops__location__dwithin=(rider_destination, search_distance))
         )
-        .distinct()
-        .order_by("departure_time")
-    )
 
-    return matched_trips
+    return matched_trips.distinct().order_by("departure_time")

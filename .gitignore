@@ -67,38 +67,49 @@ media/
 # ===============================
 # Infrastructure & Routing Data
 # ===============================
-# OSRM map data files can be multiple gigabytes
 infrastructure/osrm-data/*.pbf
 infrastructure/osrm-data/*.osrm*
 infrastructure/data/
 docker-compose.override.yml
 
 # ===============================
-# Flutter & Dart (frontend/)
+# React Native & Expo (frontend/)
 # ===============================
-frontend/.dart_tool/
-frontend/.packages
-frontend/build/
-frontend/.flutter-plugins
-frontend/.flutter-plugins-dependencies
-frontend/pubspec.lock
+# Dependencies
+node_modules/
+frontend/node_modules/
+.pnp
+.pnp.js
 
-# Android build artifacts
-frontend/android/.gradle/
-frontend/android/captures/
-frontend/android/gradlew
-frontend/android/gradlew.bat
-frontend/android/local.properties
-frontend/android/**/GeneratedPluginRegistrant.java
+# Expo cache and build directories
+.expo/
+frontend/.expo/
+.expo-shared/
+frontend/.expo-shared/
+web-build/
+frontend/web-build/
+dist/
+frontend/dist/
 
-# iOS build artifacts
-frontend/ios/Pods/
-frontend/ios/.symlinks/
-frontend/ios/Flutter/Flutter.framework
-frontend/ios/Flutter/Flutter.podspec
-frontend/ios/Flutter/Generated.xcconfig
-frontend/ios/Flutter/app.flx
-frontend/ios/Flutter/app.zip
-frontend/ios/**/GeneratedPluginRegistrant.h
-frontend/ios/**/GeneratedPluginRegistrant.m
-frontend/ios/.generated/
+# Native prebuild directories (if using Expo Prebuild / bare workflow)
+frontend/android/
+frontend/ios/
+
+# Metro bundler cache & TypeScript build cache
+.metro-health-check*
+*.tsbuildinfo
+
+# EAS / Mobile Keystores & Provisioning profiles
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+# Package manager logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
