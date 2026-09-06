@@ -24,9 +24,12 @@ class TokenOutSchema(Schema):
 
 class UserOutSchema(Schema):
     id: int
-    email: str
     username: str
-    phone_number: Optional[str] = None
-    is_phone_verified: bool
-    is_email_verified: bool
-    avatar_url: Optional[str] = None
+    email: str
+    first_name: Optional[str] = ""
+    last_name: Optional[str] = ""
+    phone_number: Optional[str] = ""
+    bio: Optional[str] = ""
+    vehicle_make_model: Optional[str] = ""
+    vehicle_color: Optional[str] = ""
+    vehicle_plate: Optional[str] = ""

@@ -1,6 +1,7 @@
 # backend/users/api.py
+from typing import Optional
 from django.contrib.auth import get_user_model
-from ninja import Router
+from ninja import Router, Schema
 from ninja.errors import HttpError
 
 from .auth import GlobalAuth, generate_token
@@ -8,6 +9,16 @@ from .schemas import LoginSchema, RegisterSchema, TokenOutSchema, UserOutSchema
 
 router = Router(tags=["Authentication"])
 User = get_user_model()
+
+
+class ProfileUpdateSchema(Schema):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    phone_number: Optional[str] = None
+    bio: Optional[str] = None
+    vehicle_make_model: Optional[str] = None
+    vehicle_color: Optional[str] = None
+    vehicle_plate: Optional[str] = None
 
 
 @router.post("/register", response={201: TokenOutSchema})
@@ -52,3 +63,15 @@ def login(request, payload: LoginSchema):
 @router.get("/me", response=UserOutSchema, auth=GlobalAuth())
 def get_current_user(request):
     return request.auth
+
+
+@router.put("/me", response=UserOutSchema, auth=GlobalAuth())
+def update_profile(request, payload: ProfileUpdateSchema):
+    user = request.auth
+
+    for field, value in payload.dict(exclude_unset=True).items():
+        if hasattr(user, field) and value is not None:
+            setattr(user, field, value)
+
+    user.save()
+    return user

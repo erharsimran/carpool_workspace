@@ -1,3 +1,4 @@
+# backend/users/models.py
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 
@@ -15,7 +16,13 @@ class User(AbstractUser):
 
     avatar_url = models.URLField(max_length=500, blank=True, null=True)
 
-    # We use email as the primary login field
+    # Driver profile & vehicle info
+    bio = models.TextField(blank=True, default="")
+    vehicle_make_model = models.CharField(max_length=100, blank=True, default="")
+    vehicle_color = models.CharField(max_length=50, blank=True, default="")
+    vehicle_plate = models.CharField(max_length=20, blank=True, default="")
+
+    # Primary login field configuration
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ["username"]
 
