@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: carpool_postgis
+    environment:
+      POSTGRES_DB: carpool_db
+      POSTGRES_USER: carpool_user
+      POSTGRES_PASSWORD: carpool_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgis_data:/var/lib/postgresql/data
+
+volumes:
+  postgis_data:

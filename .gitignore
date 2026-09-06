@@ -1,0 +1,104 @@
+# ===============================
+# Operating System & IDEs
+# ===============================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# VS Code / JetBrains / Editors
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment & Secrets (Never commit credentials)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+
+# ===============================
+# Python & Django (backend/)
+# ===============================
+backend/venv/
+backend/env/
+backend/ENV/
+*/venv/
+*/env/
+
+# Byte-compiled / optimized files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Django specific
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+media/
+
+# ===============================
+# Infrastructure & Routing Data
+# ===============================
+# OSRM map data files can be multiple gigabytes
+infrastructure/osrm-data/*.pbf
+infrastructure/osrm-data/*.osrm*
+infrastructure/data/
+docker-compose.override.yml
+
+# ===============================
+# Flutter & Dart (frontend/)
+# ===============================
+frontend/.dart_tool/
+frontend/.packages
+frontend/build/
+frontend/.flutter-plugins
+frontend/.flutter-plugins-dependencies
+frontend/pubspec.lock
+
+# Android build artifacts
+frontend/android/.gradle/
+frontend/android/captures/
+frontend/android/gradlew
+frontend/android/gradlew.bat
+frontend/android/local.properties
+frontend/android/**/GeneratedPluginRegistrant.java
+
+# iOS build artifacts
+frontend/ios/Pods/
+frontend/ios/.symlinks/
+frontend/ios/Flutter/Flutter.framework
+frontend/ios/Flutter/Flutter.podspec
+frontend/ios/Flutter/Generated.xcconfig
+frontend/ios/Flutter/app.flx
+frontend/ios/Flutter/app.zip
+frontend/ios/**/GeneratedPluginRegistrant.h
+frontend/ios/**/GeneratedPluginRegistrant.m
+frontend/ios/.generated/
