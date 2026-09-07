@@ -43,48 +43,69 @@ export interface User {
 }
 
 export interface TripStop {
-    id?: number;
+    id: number;
+    stop_name: string;
+    stop_order: number;
+    latitude?: number;
+    longitude?: number;
+    price_from_origin?: string | number | null;
+}
+
+export interface TripStopInput {
     stop_name: string;
     latitude: number;
     longitude: number;
     stop_order: number;
-    price_from_origin?: number | null;
+    price_from_origin?: number;
 }
 
 export interface Trip {
     id: number;
-    driver?: User;
     origin_name: string;
-    origin_coords: Coordinates;
+    origin_coords?: Coordinates;
     destination_name: string;
-    destination_coords: Coordinates;
+    destination_coords?: Coordinates;
     departure_time: string;
     available_seats: number;
     price_per_seat: number;
     notes?: string;
-    status: 'scheduled' | 'cancelled' | 'completed';
+    status?: 'scheduled' | 'cancelled' | 'completed';
+    driver?: User;
     stops?: TripStop[];
-}
-
-export interface Booking {
-    id: number;
-    trip: Trip;
-    seats_booked: number;
-    total_price: number;
-    status: 'confirmed' | 'cancelled' | 'completed';
-    created_at: string;
 }
 
 export interface CreateTripInput {
     origin_name: string;
-    origin_coords: Coordinates;
+    origin_lat: number;
+    origin_lng: number;
     destination_name: string;
-    destination_coords: Coordinates;
+    destination_lat: number;
+    destination_lng: number;
     departure_time: string;
     available_seats: number;
     price_per_seat: number;
-    notes: string;
-    stops?: TripStop[];
+    notes?: string;
+    stops?: TripStopInput[];
+}
+
+export interface CreateBookingPayload {
+    trip_id: number;
+    seats_booked: number;
+    pickup_stop_id?: number | null;
+    dropoff_stop_id?: number | null;
+}
+
+export interface Booking {
+    id: number;
+    trip_id: number;
+    rider_id: number;
+    seats_booked: number;
+    total_price: string;
+    status: 'confirmed' | 'cancelled' | 'completed';
+    pickup_stop_id?: number | null;
+    dropoff_stop_id?: number | null;
+    created_at: string;
+    trip?: Trip;
 }
 
 // --- API METHODS ---
@@ -167,12 +188,9 @@ export const api = {
         return res.data;
     },
 
-    createBooking: async (tripId: number, seats: number): Promise<Booking> => {
-        const res = await apiClient.post<Booking>('/bookings/', {
-            trip_id: tripId,
-            seats_booked: seats,
-        });
-        return res.data;
+    createBooking: async (payload: CreateBookingPayload): Promise<Booking> => {
+        const response = await apiClient.post<Booking>('/bookings/', payload);
+        return response.data;
     },
 
     cancelBooking: async (bookingId: number): Promise<Booking> => {

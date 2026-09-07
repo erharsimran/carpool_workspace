@@ -70,7 +70,7 @@ def create_booking(request, payload: BookingCreateSchema):
 
 @router.get("/my", response=List[BookingOutSchema])
 def list_my_bookings(request):
-    return Booking.objects.filter(rider=request.auth).order_by("-created_at")
+    return Booking.objects.filter(rider=request.auth).select_related("trip", "trip__driver").order_by("-created_at")
 
 
 @router.post("/{booking_id}/cancel", response=BookingOutSchema)

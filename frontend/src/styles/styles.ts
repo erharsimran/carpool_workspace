@@ -469,7 +469,7 @@ export const searchStyles = StyleSheet.create({
 // --- BOOKING MODAL STYLES ---
 export const bookingModalStyles = StyleSheet.create({
     backdrop: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         backgroundColor: 'rgba(15, 23, 42, 0.65)',
         justifyContent: 'center',
         alignItems: 'center',
@@ -745,5 +745,85 @@ export const profileStyles = StyleSheet.create({
         color: colors.status.danger,
         fontSize: 13,
         fontWeight: '700',
+    },
+});
+
+// Append to src/styles/styles.ts
+
+export const stopStyles = StyleSheet.create({
+    stopCard: {
+        backgroundColor: colors.inputBg,
+        borderRadius: radius.md,
+        padding: spacing.sm,
+        borderWidth: 1,
+        borderColor: colors.border,
+        marginBottom: spacing.sm,
+    },
+    stopCardHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: spacing.xs,
+    },
+    stopCardTitle: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: colors.text.secondary,
+        textTransform: 'uppercase',
+    },
+    removeText: {
+        fontSize: 12,
+        color: colors.status.danger,
+        fontWeight: '700',
+    },
+    addStopBtn: {
+        borderWidth: 1,
+        borderStyle: 'dashed',
+        borderColor: colors.primary,
+        backgroundColor: colors.primaryLight,
+        borderRadius: radius.md,
+        paddingVertical: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: spacing.md,
+    },
+    addStopBtnText: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: colors.primary,
+    },
+    // Booking Modal Location Picker
+    selectLabel: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: colors.text.secondary,
+        marginBottom: 6,
+        marginTop: spacing.xs,
+    },
+    optionPillGroup: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 6,
+        marginBottom: spacing.sm,
+    },
+    optionPill: {
+        paddingVertical: 6,
+        paddingHorizontal: spacing.sm,
+        borderRadius: radius.md,
+        borderWidth: 1,
+        borderColor: colors.border,
+        backgroundColor: colors.surface,
+    },
+    optionPillActive: {
+        backgroundColor: colors.buttonDark,
+        borderColor: colors.buttonDark,
+    },
+    optionPillText: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: colors.text.secondary,
+    },
+    optionPillTextActive: {
+        color: colors.text.inverse,
     },
 });

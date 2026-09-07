@@ -1,9 +1,9 @@
-
 from datetime import timedelta
 from typing import List, Optional
 from django.contrib.auth import get_user_model
 from django.contrib.gis.geos import Point
 from django.contrib.gis.measure import D
+from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -42,65 +42,53 @@ def _get_authenticated_driver(request):
 @router.post("/", response={201: TripOutSchema}, auth=GlobalAuth())
 def create_trip(request, payload: TripCreateSchema):
     driver = _get_authenticated_driver(request)
-
-    # GeoDjango Point format: (Longitude, Latitude)
-    origin_point = Point(
-        payload.origin_coords.longitude,
-        payload.origin_coords.latitude,
-        srid=4326,
-    )
-    destination_point = Point(
-        payload.destination_coords.longitude,
-        payload.destination_coords.latitude,
-        srid=4326,
-    )
-
-    # Assemble waypoints in order: Origin -> Intermediate Stops -> Destination
-    sorted_stops = sorted(payload.stops or [], key=lambda s: s.stop_order)
-    waypoint_coords = [(payload.origin_coords.longitude, payload.origin_coords.latitude)]
-    for stop in sorted_stops:
-        # Handles both object or dict coordinate representations
-        lng = getattr(stop, "longitude", None) or getattr(getattr(stop, "coords", None), "longitude", 0.0)
-        lat = getattr(stop, "latitude", None) or getattr(getattr(stop, "coords", None), "latitude", 0.0)
-        waypoint_coords.append((lng, lat))
-    waypoint_coords.append((payload.destination_coords.longitude, payload.destination_coords.latitude))
-
-    # Fetch real highway routing geometry from local OSRM
-    route_line = fetch_route_geometry(waypoint_coords)
-
-    trip = Trip.objects.create(
-        driver=driver,
-        origin_name=payload.origin_name,
-        origin_coords=origin_point,
-        destination_name=payload.destination_name,
-        destination_coords=destination_point,
-        route_geometry=route_line,
-        departure_time=payload.departure_time,
-        available_seats=payload.available_seats,
-        price_per_seat=payload.price_per_seat,
-        notes=payload.notes or "",
-        status="scheduled",
-    )
-
-    for stop_data in sorted_stops:
-        lng = getattr(stop_data, "longitude", None) or getattr(getattr(stop_data, "coords", None), "longitude", 0.0)
-        lat = getattr(stop_data, "latitude", None) or getattr(getattr(stop_data, "coords", None), "latitude", 0.0)
-        stop_point = Point(lng, lat, srid=4326)
-
-        TripStop.objects.create(
-            trip=trip,
-            stop_name=stop_data.stop_name,
-            location=stop_point,
-            stop_order=stop_data.stop_order,
-            price_from_origin=getattr(stop_data, "price_from_origin", None),
+    vehicle_model = getattr(driver, "vehicle_make_model", None)
+    vehicle_plate = getattr(driver, "vehicle_plate", None)
+    if not vehicle_model or not vehicle_plate:
+        raise HttpError(
+            400,
+            "You must register your vehicle details (make/model and plate) in your profile before posting a ride.",
+        )
+    with transaction.atomic():
+        trip = Trip.objects.create(
+            driver=driver,
+            origin_name=payload.origin_name,
+            origin_coords=Point(payload.origin_lng, payload.origin_lat, srid=4326),
+            destination_name=payload.destination_name,
+            destination_coords=Point(payload.destination_lng, payload.destination_lat, srid=4326),
+            departure_time=payload.departure_time,
+            available_seats=payload.available_seats,
+            price_per_seat=payload.price_per_seat,
+            notes=payload.notes or "",
         )
 
-    return 201, trip
+        for stop_data in (payload.stops or []):
+            TripStop.objects.create(
+                trip=trip,
+                stop_name=stop_data.stop_name,
+                location=Point(stop_data.longitude, stop_data.latitude, srid=4326),
+                stop_order=stop_data.stop_order,
+                price_from_origin=stop_data.price_from_origin,
+            )
+
+    return 201, (
+        Trip.objects.select_related("driver")
+        .prefetch_related("stops")
+        .get(id=trip.id)
+    )
 
 
 @router.get("/", response=List[TripOutSchema])
 def list_trips(request):
-    return Trip.objects.filter(status="scheduled").order_by("departure_time")
+    return (
+        Trip.objects.filter(
+            status="scheduled",
+            departure_time__gte=timezone.now(),
+        )
+        .select_related("driver")
+        .prefetch_related("stops")
+        .order_by("departure_time")
+    )
 
 
 @router.get("/search", response=List[TripOutSchema])
@@ -112,14 +100,16 @@ def search_trips(
     dest_lng: Optional[float] = None,
     radius_km: float = 15.0,
 ):
+    # Only scheduled, future trips with open seats
     matched_trips = Trip.objects.filter(
         status="scheduled",
         available_seats__gt=0,
+        departure_time__gte=timezone.now(),
     )
 
     search_distance = D(km=radius_km)
 
-    # 1. Filter by Origin (pickup stop or trip origin within radius)
+    # 1. Filter by Origin (trip origin or intermediate pickup stop within radius)
     if origin_lat is not None and origin_lng is not None:
         rider_origin = Point(origin_lng, origin_lat, srid=4326)
         matched_trips = matched_trips.filter(
@@ -127,7 +117,7 @@ def search_trips(
             | Q(stops__location__dwithin=(rider_origin, search_distance))
         )
 
-    # 2. Filter by Destination (dropoff stop or trip destination within radius)
+    # 2. Filter by Destination (trip destination or intermediate dropoff stop within radius)
     if dest_lat is not None and dest_lng is not None:
         rider_destination = Point(dest_lng, dest_lat, srid=4326)
         matched_trips = matched_trips.filter(
@@ -135,13 +125,23 @@ def search_trips(
             | Q(stops__location__dwithin=(rider_destination, search_distance))
         )
 
-    return matched_trips.distinct().order_by("departure_time")
+    return (
+        matched_trips.distinct()
+        .select_related("driver")
+        .prefetch_related("stops")
+        .order_by("departure_time")
+    )
 
 
 @router.get("/my-posted", response=List[TripOutSchema], auth=GlobalAuth())
 def get_my_posted_trips(request):
     driver = _get_authenticated_driver(request)
-    return Trip.objects.filter(driver=driver).order_by("-departure_time")
+    return (
+        Trip.objects.filter(driver=driver)
+        .select_related("driver")
+        .prefetch_related("stops")
+        .order_by("-departure_time")
+    )
 
 
 @router.put("/{trip_id}", response=TripOutSchema, auth=GlobalAuth())
@@ -190,7 +190,7 @@ def cancel_posted_trip(request, trip_id: int):
     trip.status = "cancelled"
     trip.save()
 
-    # Cancel any confirmed bookings and release reservations
+    # Cancel confirmed bookings and release reservations
     if hasattr(trip, "bookings"):
         trip.bookings.filter(status="confirmed").update(status="cancelled")
 

@@ -45,14 +45,15 @@ export const BookingsScreen: React.FC = () => {
 
   const handleCancelBooking = (booking: Booking) => {
     if (!booking.trip?.departure_time) {
-      showError('Cannot calculate cancellation window for this booking.');
+      showError('Departure time unavailable for this booking.');
       return;
     }
 
     const departureTime = new Date(booking.trip.departure_time).getTime();
     const hoursRemaining = (departureTime - Date.now()) / (1000 * 60 * 60);
 
-    if (hoursRemaining < 5) {
+    // Only lock if departure is in the future but less than 5 hours away
+    if (hoursRemaining >= 0 && hoursRemaining < 5) {
       showWarning(
         'Cancellations are locked within 5 hours of departure per policy.',
         'Cancellation Locked'
@@ -60,7 +61,7 @@ export const BookingsScreen: React.FC = () => {
       return;
     }
 
-    const confirmMsg = `Cancel your reservation for ${booking.trip.origin_name || 'ride'} to ${booking.trip.destination_name || 'destination'}? Seats will be released immediately.`;
+    const confirmMsg = `Cancel your reservation for ${booking.trip.origin_name || 'ride'} to ${booking.trip.destination_name || 'destination'}? Seats will be returned to the trip.`;
 
     if (Platform.OS === 'web') {
       if (window.confirm(confirmMsg)) {
@@ -84,7 +85,7 @@ export const BookingsScreen: React.FC = () => {
     try {
       await api.cancelBooking(bookingId);
       showSuccess('Your reservation has been cancelled.', 'Cancelled');
-      loadBookings();
+      await loadBookings();
     } catch (err: any) {
       const msg =
         err.response?.data?.detail ||
@@ -96,9 +97,12 @@ export const BookingsScreen: React.FC = () => {
     }
   };
 
-  const getStatusTheme = (status: Booking['status']) => {
+  const getStatusTheme = (rawStatus: string = '') => {
+    const status = rawStatus.toLowerCase();
     switch (status) {
       case 'confirmed':
+      case 'booked':
+      case 'active':
         return {
           badgeStyle: bookingStyles.badgeConfirmed,
           textColor: '#065F46',
@@ -143,28 +147,22 @@ export const BookingsScreen: React.FC = () => {
             ) : null
           }
           renderItem={({ item }) => {
-            // Defensive fallback if trip data is missing or removed
-            if (!item.trip) {
-              return (
-                <View style={globalStyles.card}>
-                  <Text style={bookingStyles.detailLabel}>
-                    Booking #{item.id} (Trip information unavailable)
-                  </Text>
-                  <Text style={searchStyles.priceAmount}>${item.total_price} CAD</Text>
-                </View>
-              );
-            }
+            const rawStatus = (item.status || '').toLowerCase();
+            const isCancelled = rawStatus === 'cancelled';
+            const isCompleted = rawStatus === 'completed';
+            const canAttemptCancel = !isCancelled && !isCompleted;
 
-            const departureDate = item.trip.departure_time
+            const departureDate = item.trip?.departure_time
               ? new Date(item.trip.departure_time)
               : null;
 
-            const hoursRemaining = departureDate
-              ? (departureDate.getTime() - Date.now()) / (1000 * 60 * 60)
-              : 0;
+            const now = Date.now();
+            const departureTime = departureDate ? departureDate.getTime() : 0;
+            const hoursRemaining = (departureTime - now) / (1000 * 60 * 60);
 
+            // True only if departure is upcoming AND within 5 hours
             const isWithinLockWindow =
-              hoursRemaining < 5 && item.status === 'confirmed';
+              departureTime > now && hoursRemaining < 5 && canAttemptCancel;
 
             const { badgeStyle, textColor } = getStatusTheme(item.status);
 
@@ -172,7 +170,12 @@ export const BookingsScreen: React.FC = () => {
               <View style={globalStyles.card}>
                 <View style={bookingStyles.headerRow}>
                   <View style={[bookingStyles.statusBadge, badgeStyle]}>
-                    <Text style={[bookingStyles.statusBadgeText, { color: textColor }]}>
+                    <Text
+                      style={[
+                        bookingStyles.statusBadgeText,
+                        { color: textColor },
+                      ]}
+                    >
                       {item.status}
                     </Text>
                   </View>
@@ -182,11 +185,11 @@ export const BookingsScreen: React.FC = () => {
                 {/* Route */}
                 <View style={[searchStyles.routeBox, { marginVertical: spacing.xs }]}>
                   <Text style={searchStyles.originText} numberOfLines={1}>
-                    {item.trip.origin_name || 'Origin'}
+                    {item.trip?.origin_name || 'Origin not specified'}
                   </Text>
                   <Text style={searchStyles.routeArrow}>↓</Text>
                   <Text style={searchStyles.destinationText} numberOfLines={1}>
-                    {item.trip.destination_name || 'Destination'}
+                    {item.trip?.destination_name || 'Destination not specified'}
                   </Text>
                 </View>
 
@@ -201,7 +204,7 @@ export const BookingsScreen: React.FC = () => {
                           hour: 'numeric',
                           minute: '2-digit',
                         })
-                      : 'TBD'}
+                      : 'Date not set'}
                   </Text>
                 </View>
 
@@ -212,7 +215,7 @@ export const BookingsScreen: React.FC = () => {
                   </Text>
                 </View>
 
-                {item.trip.driver && (
+                {item.trip?.driver && (
                   <View style={bookingStyles.detailRow}>
                     <Text style={bookingStyles.detailLabel}>Driver</Text>
                     <Text style={bookingStyles.detailValue}>
@@ -224,17 +227,17 @@ export const BookingsScreen: React.FC = () => {
                   </View>
                 )}
 
-                {/* 5-Hour Lock Notification */}
+                {/* Lock Window Notice */}
                 {isWithinLockWindow && (
                   <View style={bookingStyles.lockNotice}>
                     <Text style={bookingStyles.lockNoticeText}>
-                      Locked: Departure is in less than 5 hours. Cancellation and refund options are closed.
+                      Departure is in under 5 hours. Cancellation is locked.
                     </Text>
                   </View>
                 )}
 
                 {/* Cancel Action Button */}
-                {item.status === 'confirmed' && (
+                {canAttemptCancel && (
                   <TouchableOpacity
                     style={[
                       bookingStyles.cancelBtn,

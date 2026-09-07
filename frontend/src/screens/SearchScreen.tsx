@@ -9,6 +9,7 @@ import {
   SafeAreaView,
   ScrollView,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
 import { api, Trip } from '../services/api';
 import { searchLocations, LocationSuggestion } from '../services/geocoding';
@@ -22,7 +23,18 @@ import {
   searchFormStyles,
   routeListStyles,
   bookingModalStyles,
+  stopStyles,
 } from '../styles/styles';
+
+const RECENT_SEARCHES_KEY = '@ontarioride_recent_searches';
+
+interface RecentSearchItem {
+  id: string;
+  originName: string;
+  destName: string;
+  originCoords?: { latitude: number; longitude: number } | null;
+  destCoords?: { latitude: number; longitude: number } | null;
+}
 
 const POPULAR_ROUTES = [
   { origin: 'Cambridge', destination: 'Burlington' },
@@ -36,7 +48,7 @@ const POPULAR_ROUTES = [
 
 export const SearchScreen: React.FC = () => {
   const navigation = useNavigation<any>();
-  const { showSuccess, showError } = useAlert();
+  const { showSuccess, showError, showWarning } = useAlert();
 
   const [originQuery, setOriginQuery] = useState('');
   const [destinationQuery, setDestinationQuery] = useState('');
@@ -52,27 +64,118 @@ export const SearchScreen: React.FC = () => {
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
 
+  // Saved / Recent Searches
+  const [recentSearches, setRecentSearches] = useState<RecentSearchItem[]>([]);
+
+  // Booking Modal State
   const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
   const [seatsToBook, setSeatsToBook] = useState(1);
+  const [selectedPickupStopId, setSelectedPickupStopId] = useState<number | null>(null);
+  const [selectedDropoffStopId, setSelectedDropoffStopId] = useState<number | null>(null);
   const [isBooking, setIsBooking] = useState(false);
 
-  const loadTrips = useCallback(async () => {
-    setIsSearching(true);
-    setHasSearched(true);
+  // Load saved recent searches from AsyncStorage on mount
+  useEffect(() => {
+    const loadRecentSearches = async () => {
+      try {
+        const stored = await AsyncStorage.getItem(RECENT_SEARCHES_KEY);
+        if (stored) {
+          setRecentSearches(JSON.parse(stored));
+        }
+      } catch (err) {
+        console.warn('Failed to load recent searches:', err);
+      }
+    };
+    loadRecentSearches();
+  }, []);
+
+  // Save a search item to AsyncStorage (max 5 unique entries)
+  const saveSearch = async (
+    origName: string,
+    dstName: string,
+    origCoords?: { latitude: number; longitude: number } | null,
+    dstCoords?: { latitude: number; longitude: number } | null
+  ) => {
+    if (!origName.trim() && !dstName.trim()) return;
+
     try {
-      const results = await api.searchTrips({
-        origin_lat: originSelected?.latitude,
-        origin_lng: originSelected?.longitude,
-        dest_lat: destSelected?.latitude,
-        dest_lng: destSelected?.longitude,
-      });
-      setTrips(results);
-    } catch (err: any) {
-      showError(err.message || 'Failed to search trips.');
-    } finally {
-      setIsSearching(false);
+      const newItem: RecentSearchItem = {
+        id: `${origName}-${dstName}-${Date.now()}`,
+        originName: origName.trim(),
+        destName: dstName.trim(),
+        originCoords: origCoords || null,
+        destCoords: dstCoords || null,
+      };
+
+      const stored = await AsyncStorage.getItem(RECENT_SEARCHES_KEY);
+      const list: RecentSearchItem[] = stored ? JSON.parse(stored) : [];
+
+      const filtered = list.filter(
+        (item) =>
+          !(
+            item.originName.toLowerCase() === origName.trim().toLowerCase() &&
+            item.destName.toLowerCase() === dstName.trim().toLowerCase()
+          )
+      );
+
+      const updated = [newItem, ...filtered].slice(0, 5);
+      setRecentSearches(updated);
+      await AsyncStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(updated));
+    } catch (err) {
+      console.warn('Failed to save recent search:', err);
     }
-  }, [originSelected, destSelected, showError]);
+  };
+
+  const handleClearRecentSearches = async () => {
+    try {
+      await AsyncStorage.removeItem(RECENT_SEARCHES_KEY);
+      setRecentSearches([]);
+    } catch (err) {
+      console.warn('Failed to clear recent searches:', err);
+    }
+  };
+
+  const executeSearch = useCallback(
+    async (
+      overrideOrigin?: { lat?: number; lng?: number; name?: string },
+      overrideDest?: { lat?: number; lng?: number; name?: string }
+    ) => {
+      setIsSearching(true);
+      setHasSearched(true);
+
+      const origLat = overrideOrigin ? overrideOrigin.lat : originSelected?.latitude;
+      const origLng = overrideOrigin ? overrideOrigin.lng : originSelected?.longitude;
+      const destLat = overrideDest ? overrideDest.lat : destSelected?.latitude;
+      const destLng = overrideDest ? overrideDest.lng : destSelected?.longitude;
+
+      const origName = overrideOrigin?.name ?? originQuery;
+      const dstName = overrideDest?.name ?? destinationQuery;
+
+      try {
+        const results = await api.searchTrips({
+          origin_lat: origLat,
+          origin_lng: origLng,
+          dest_lat: destLat,
+          dest_lng: destLng,
+        });
+        setTrips(results);
+
+        if (origName || dstName) {
+          saveSearch(
+            origName,
+            dstName,
+            origLat && origLng ? { latitude: origLat, longitude: origLng } : null,
+            destLat && destLng ? { latitude: destLat, longitude: destLng } : null
+          );
+        }
+      } catch (err: any) {
+        showError(err.message || 'Failed to search trips.');
+      } finally {
+        setIsSearching(false);
+      }
+    },
+    [originSelected, destSelected, originQuery, destinationQuery, showError]
+  );
 
   const handleLocationQueryChange = async (text: string, field: 'origin' | 'destination') => {
     if (field === 'origin') {
@@ -116,28 +219,94 @@ export const SearchScreen: React.FC = () => {
     setDestSelected(tempItem);
   };
 
+  const handleSelectRecentSearch = (item: RecentSearchItem) => {
+    setOriginQuery(item.originName);
+    setDestinationQuery(item.destName);
+
+    const origCoords = item.originCoords
+      ? { latitude: item.originCoords.latitude, longitude: item.originCoords.longitude, displayName: item.originName, id: 0 }
+      : null;
+    const dstCoords = item.destCoords
+      ? { latitude: item.destCoords.latitude, longitude: item.destCoords.longitude, displayName: item.destName, id: 0 }
+      : null;
+
+    setOriginSelected(origCoords as any);
+    setDestSelected(dstCoords as any);
+
+    executeSearch(
+      { lat: item.originCoords?.latitude, lng: item.originCoords?.longitude, name: item.originName },
+      { lat: item.destCoords?.latitude, lng: item.destCoords?.longitude, name: item.destName }
+    );
+  };
+
   const handleSelectPopularRoute = (route: { origin: string; destination: string }) => {
     setOriginQuery(route.origin);
     setDestinationQuery(route.destination);
     setOriginSelected(null);
     setDestSelected(null);
-    loadTrips();
+
+    executeSearch(
+      { name: route.origin },
+      { name: route.destination }
+    );
+  };
+
+  const openBookingModal = (trip: Trip) => {
+    setSelectedTrip(trip);
+    setSeatsToBook(1);
+    setSelectedPickupStopId(null);
+    setSelectedDropoffStopId(null);
+  };
+
+  const validateStopOrder = (): boolean => {
+    if (!selectedTrip || !selectedTrip.stops) return true;
+
+    if (selectedPickupStopId !== null && selectedDropoffStopId !== null) {
+      if (selectedPickupStopId === selectedDropoffStopId) {
+        showWarning('Pick-up and drop-off cannot be the same stop.', 'Invalid Route');
+        return false;
+      }
+      const pStop = selectedTrip.stops.find((s) => s.id === selectedPickupStopId);
+      const dStop = selectedTrip.stops.find((s) => s.id === selectedDropoffStopId);
+      if (pStop && dStop && pStop.stop_order >= dStop.stop_order) {
+        showWarning('Drop-off stop must occur after pick-up stop along the route.', 'Invalid Order');
+        return false;
+      }
+    }
+    return true;
   };
 
   const handleConfirmBooking = async () => {
     if (!selectedTrip) return;
+    if (!validateStopOrder()) return;
+
     setIsBooking(true);
     try {
-      await api.createBooking(selectedTrip.id, seatsToBook);
+      await api.createBooking({
+        trip_id: selectedTrip.id,
+        seats_booked: seatsToBook,
+        pickup_stop_id: selectedPickupStopId,
+        dropoff_stop_id: selectedDropoffStopId,
+      });
       showSuccess(`Successfully booked ${seatsToBook} seat(s).`, 'Ride Booked');
       setSelectedTrip(null);
-      setSeatsToBook(1);
-      loadTrips();
+      executeSearch();
     } catch (err: any) {
       showError(err.response?.data?.detail || 'Booking failed.', 'Error');
     } finally {
       setIsBooking(false);
     }
+  };
+
+  const calculateEffectivePrice = (): number => {
+    if (!selectedTrip) return 0;
+    if (selectedPickupStopId) {
+      const stop = selectedTrip.stops?.find((s) => s.id === selectedPickupStopId);
+      if (stop && stop.price_from_origin) {
+        return Number(stop.price_from_origin);
+      }
+    }
+    return Number(selectedTrip.price_per_seat);
   };
 
   return (
@@ -146,21 +315,23 @@ export const SearchScreen: React.FC = () => {
         contentContainerStyle={[globalStyles.screenContainer, { paddingBottom: spacing.xl }]}
         keyboardShouldPersistTaps="handled"
       >
+        {/* Banner Card */}
         <View style={heroStyles.bannerCard}>
           <View style={heroStyles.textContainer}>
             <Text style={heroStyles.title}>Find your ride</Text>
-            <Text style={heroStyles.subtitle}>Get a ride with a verified driver</Text>
+            <Text style={heroStyles.subtitle}>Select verified pickup and drop-off points</Text>
             <TouchableOpacity onPress={() => navigation.navigate('Post')}>
-              <Text style={heroStyles.linkText}>How it works</Text>
+              <Text style={heroStyles.linkText}>Offer a ride with stops</Text>
             </TouchableOpacity>
           </View>
-
           <View style={heroStyles.iconCircle}>
             <Text style={heroStyles.iconEmoji}>🚗</Text>
           </View>
         </View>
 
+        {/* Input Fields */}
         <View style={searchFormStyles.inputContainer}>
+          {/* Origin */}
           <View style={searchFormStyles.inputField}>
             <Text style={searchFormStyles.fieldIcon}>📍</Text>
             <TextInput
@@ -173,17 +344,22 @@ export const SearchScreen: React.FC = () => {
             {originQuery.length > 0 && (
               <TouchableOpacity
                 style={searchFormStyles.clearBtn}
-                onPress={() => setOriginQuery('')}
+                onPress={() => {
+                  setOriginQuery('');
+                  setOriginSelected(null);
+                }}
               >
                 <Text style={searchFormStyles.clearText}>✕</Text>
               </TouchableOpacity>
             )}
           </View>
 
+          {/* Swap Button */}
           <TouchableOpacity style={searchFormStyles.swapBtn} onPress={handleSwapRoute}>
             <Text style={searchFormStyles.swapText}>⇅</Text>
           </TouchableOpacity>
 
+          {/* Destination */}
           <View style={searchFormStyles.inputField}>
             <Text style={searchFormStyles.fieldIcon}>📍</Text>
             <TextInput
@@ -196,24 +372,29 @@ export const SearchScreen: React.FC = () => {
             {destinationQuery.length > 0 && (
               <TouchableOpacity
                 style={searchFormStyles.clearBtn}
-                onPress={() => setDestinationQuery('')}
+                onPress={() => {
+                  setDestinationQuery('');
+                  setDestSelected(null);
+                }}
               >
                 <Text style={searchFormStyles.clearText}>✕</Text>
               </TouchableOpacity>
             )}
           </View>
 
+          {/* Optional Date */}
           <View style={searchFormStyles.inputField}>
             <Text style={searchFormStyles.fieldIcon}>📅</Text>
             <TextInput
               style={searchFormStyles.inputText}
-              placeholder="Departing (optional)"
+              placeholder="Departing date (optional)"
               placeholderTextColor={colors.text.muted}
               value={departingDate}
               onChangeText={setDepartingDate}
             />
           </View>
 
+          {/* Auto-suggest dropdown */}
           {suggestions.length > 0 && (
             <View style={searchStyles.suggestionBox}>
               {suggestions.map((item) => (
@@ -230,9 +411,10 @@ export const SearchScreen: React.FC = () => {
             </View>
           )}
 
+          {/* Search Button */}
           <TouchableOpacity
             style={[searchFormStyles.darkSearchBtn, isSearching && globalStyles.btnDisabled]}
-            onPress={loadTrips}
+            onPress={() => executeSearch()}
             disabled={isSearching}
           >
             {isSearching ? (
@@ -243,8 +425,48 @@ export const SearchScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
+        {/* State Before User Runs a Search */}
         {!hasSearched ? (
-          <View style={{ marginTop: spacing.md }}>
+          <View style={{ marginTop: spacing.sm }}>
+            {/* Recent Searches Section */}
+            {recentSearches.length > 0 && (
+              <View style={{ marginBottom: spacing.md }}>
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: spacing.xs,
+                  }}
+                >
+                  <Text style={[searchStyles.headerTitle, { fontSize: 14, marginBottom: 0 }]}>
+                    Recent Searches
+                  </Text>
+                  <TouchableOpacity onPress={handleClearRecentSearches}>
+                    <Text style={{ fontSize: 12, color: colors.status.danger, fontWeight: '600' }}>
+                      Clear
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {recentSearches.map((item) => (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={routeListStyles.itemRow}
+                    onPress={() => handleSelectRecentSearch(item)}
+                  >
+                    <Text style={routeListStyles.itemText}>
+                      🕒 {item.originName || 'Anywhere'} ➔ {item.destName || 'Anywhere'}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            {/* Popular Routes Section */}
+            <Text style={[searchStyles.headerTitle, { fontSize: 14, marginBottom: spacing.xs }]}>
+              Popular Ontario Routes
+            </Text>
             {POPULAR_ROUTES.map((route, index) => (
               <TouchableOpacity
                 key={index}
@@ -258,87 +480,204 @@ export const SearchScreen: React.FC = () => {
             ))}
           </View>
         ) : (
+          /* Search Results */
           <View style={{ marginTop: spacing.md }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: spacing.sm,
+              }}
+            >
+              <Text style={[searchStyles.headerTitle, { marginBottom: 0 }]}>Available Rides</Text>
+              <TouchableOpacity onPress={() => setHasSearched(false)}>
+                <Text style={{ fontSize: 12, color: colors.primary, fontWeight: '600' }}>
+                  Back to Suggestions
+                </Text>
+              </TouchableOpacity>
+            </View>
+
             {trips.length === 0 && !isSearching ? (
               <View style={searchStyles.emptyState}>
                 <Text style={searchStyles.emptyTitle}>No rides found</Text>
                 <Text style={searchStyles.emptySubtitle}>
-                  Try selecting another date or broad location.
+                  Try searching a different location or check back soon.
                 </Text>
               </View>
             ) : (
-              trips.map((item) => (
-                <View key={item.id} style={globalStyles.card}>
-                  <View style={searchStyles.tripHeader}>
-                    <View style={searchStyles.routeBox}>
-                      <Text style={searchStyles.originText} numberOfLines={1}>
-                        {item.origin_name}
+              trips.map((item) => {
+                const departureDate = new Date(item.departure_time);
+                const hasStops = Boolean(item.stops && item.stops.length > 0);
+                const isFull = item.available_seats < 1;
+
+                return (
+                  <View key={item.id} style={globalStyles.card}>
+                    <View style={searchStyles.tripHeader}>
+                      <View style={searchStyles.routeBox}>
+                        <Text style={searchStyles.originText} numberOfLines={1}>
+                          {item.origin_name}
+                        </Text>
+                        {hasStops ? (
+                          <Text
+                            style={{
+                              fontSize: 12,
+                              color: colors.primary,
+                              fontWeight: '700',
+                              marginVertical: 2,
+                            }}
+                          >
+                            + {item.stops!.length} intermediate stop{item.stops!.length !== 1 ? 's' : ''}
+                          </Text>
+                        ) : null}
+                        <Text style={searchStyles.routeArrow}>↓</Text>
+                        <Text style={searchStyles.destinationText} numberOfLines={1}>
+                          {item.destination_name}
+                        </Text>
+                      </View>
+                      <View>
+                        <Text style={searchStyles.priceAmount}>${item.price_per_seat}</Text>
+                        <Text style={searchStyles.priceUnit}>per seat</Text>
+                      </View>
+                    </View>
+
+                    <View style={searchStyles.metaRow}>
+                      <Text style={searchStyles.metaText}>
+                        🕒{' '}
+                        {departureDate.toLocaleString('en-CA', {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: 'numeric',
+                          minute: '2-digit',
+                        })}
                       </Text>
-                      <Text style={searchStyles.routeArrow}>↓</Text>
-                      <Text style={searchStyles.destinationText} numberOfLines={1}>
-                        {item.destination_name}
+                      <Text style={searchStyles.metaText}>
+                        💺 {item.available_seats} seat{item.available_seats !== 1 ? 's' : ''} left
                       </Text>
                     </View>
-                    <View>
-                      <Text style={searchStyles.priceAmount}>${item.price_per_seat}</Text>
-                      <Text style={searchStyles.priceUnit}>per seat</Text>
-                    </View>
-                  </View>
 
-                  <View style={searchStyles.metaRow}>
-                    <Text style={searchStyles.metaText}>
-                      🕒{' '}
-                      {new Date(item.departure_time).toLocaleString('en-CA', {
-                        month: 'short',
-                        day: 'numeric',
-                        hour: 'numeric',
-                        minute: '2-digit',
-                      })}
-                    </Text>
-                    <Text style={searchStyles.metaText}>
-                      💺 {item.available_seats} seat
-                      {item.available_seats !== 1 ? 's' : ''} left
-                    </Text>
-                  </View>
+                    {item.driver && (
+                      <Text style={searchStyles.driverInfo}>
+                        Driver: {item.driver.first_name || item.driver.username}
+                        {item.driver.vehicle_make_model ? ` • ${item.driver.vehicle_make_model}` : ''}
+                      </Text>
+                    )}
 
-                  <TouchableOpacity
-                    style={[
-                      globalStyles.primaryBtn,
-                      item.available_seats < 1 && globalStyles.btnDisabled,
-                      { marginTop: spacing.sm },
-                    ]}
-                    disabled={item.available_seats < 1}
-                    onPress={() => {
-                      setSelectedTrip(item);
-                      setSeatsToBook(1);
-                    }}
-                  >
-                    <Text style={globalStyles.primaryBtnText}>
-                      {item.available_seats < 1 ? 'Trip Full' : 'Book Seat'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              ))
+                    <TouchableOpacity
+                      style={[
+                        globalStyles.primaryBtn,
+                        isFull && globalStyles.btnDisabled,
+                        { marginTop: spacing.sm },
+                      ]}
+                      disabled={isFull}
+                      onPress={() => openBookingModal(item)}
+                    >
+                      <Text style={globalStyles.primaryBtnText}>
+                        {isFull ? 'Trip Full' : 'Book Seat'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })
             )}
           </View>
         )}
       </ScrollView>
 
+      {/* Booking Modal Overlay */}
       {selectedTrip && (
         <View style={bookingModalStyles.backdrop}>
           <View style={[globalStyles.card, bookingModalStyles.modalCard]}>
-            <Text style={bookingModalStyles.modalTitle}>Confirm Booking</Text>
-            <Text style={bookingModalStyles.modalRoute}>
-              {selectedTrip.origin_name} ➔ {selectedTrip.destination_name}
-            </Text>
-            <Text style={bookingModalStyles.modalMeta}>
-              {new Date(selectedTrip.departure_time).toLocaleString('en-CA', {
-                dateStyle: 'medium',
-                timeStyle: 'short',
-              })}
-            </Text>
+            <Text style={bookingModalStyles.modalTitle}>Select Pick-up & Drop-off</Text>
 
-            <Text style={globalStyles.label}>Seats</Text>
+            {/* Pick-Up Stop Selector */}
+            <Text style={stopStyles.selectLabel}>1. Pick-Up Location:</Text>
+            <View style={stopStyles.optionPillGroup}>
+              <TouchableOpacity
+                style={[
+                  stopStyles.optionPill,
+                  selectedPickupStopId === null && stopStyles.optionPillActive,
+                ]}
+                onPress={() => setSelectedPickupStopId(null)}
+              >
+                <Text
+                  style={[
+                    stopStyles.optionPillText,
+                    selectedPickupStopId === null && stopStyles.optionPillTextActive,
+                  ]}
+                  numberOfLines={1}
+                >
+                  Origin: {selectedTrip.origin_name.split(',')[0]}
+                </Text>
+              </TouchableOpacity>
+
+              {selectedTrip.stops?.map((stop) => (
+                <TouchableOpacity
+                  key={stop.id}
+                  style={[
+                    stopStyles.optionPill,
+                    selectedPickupStopId === stop.id && stopStyles.optionPillActive,
+                  ]}
+                  onPress={() => setSelectedPickupStopId(stop.id)}
+                >
+                  <Text
+                    style={[
+                      stopStyles.optionPillText,
+                      selectedPickupStopId === stop.id && stopStyles.optionPillTextActive,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    📍 {stop.stop_name.split(',')[0]}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Drop-Off Stop Selector */}
+            <Text style={stopStyles.selectLabel}>2. Drop-Off Location:</Text>
+            <View style={stopStyles.optionPillGroup}>
+              {selectedTrip.stops?.map((stop) => (
+                <TouchableOpacity
+                  key={stop.id}
+                  style={[
+                    stopStyles.optionPill,
+                    selectedDropoffStopId === stop.id && stopStyles.optionPillActive,
+                  ]}
+                  onPress={() => setSelectedDropoffStopId(stop.id)}
+                >
+                  <Text
+                    style={[
+                      stopStyles.optionPillText,
+                      selectedDropoffStopId === stop.id && stopStyles.optionPillTextActive,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    📍 {stop.stop_name.split(',')[0]}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+
+              <TouchableOpacity
+                style={[
+                  stopStyles.optionPill,
+                  selectedDropoffStopId === null && stopStyles.optionPillActive,
+                ]}
+                onPress={() => setSelectedDropoffStopId(null)}
+              >
+                <Text
+                  style={[
+                    stopStyles.optionPillText,
+                    selectedDropoffStopId === null && stopStyles.optionPillTextActive,
+                  ]}
+                  numberOfLines={1}
+                >
+                  Destination: {selectedTrip.destination_name.split(',')[0]}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Seat Selector */}
+            <Text style={stopStyles.selectLabel}>Seats</Text>
             <View style={bookingModalStyles.counterRow}>
               <TouchableOpacity
                 style={bookingModalStyles.counterBtn}
@@ -350,22 +689,22 @@ export const SearchScreen: React.FC = () => {
               <TouchableOpacity
                 style={bookingModalStyles.counterBtn}
                 onPress={() =>
-                  setSeatsToBook((p) =>
-                    Math.min(selectedTrip.available_seats, p + 1)
-                  )
+                  setSeatsToBook((p) => Math.min(selectedTrip.available_seats, p + 1))
                 }
               >
                 <Text style={bookingModalStyles.counterBtnText}>+</Text>
               </TouchableOpacity>
             </View>
 
+            {/* Total Fare */}
             <View style={bookingModalStyles.fareRow}>
-              <Text style={bookingModalStyles.fareLabel}>Total:</Text>
+              <Text style={bookingModalStyles.fareLabel}>Total Price:</Text>
               <Text style={bookingModalStyles.fareAmount}>
-                ${seatsToBook * selectedTrip.price_per_seat} CAD
+                ${seatsToBook * calculateEffectivePrice()} CAD
               </Text>
             </View>
 
+            {/* Modal Actions */}
             <View style={bookingModalStyles.buttonRow}>
               <TouchableOpacity
                 style={[globalStyles.outlineBtn, { flex: 1, marginRight: spacing.sm }]}
