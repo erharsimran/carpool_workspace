@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import List, Optional
 from django.contrib.auth import get_user_model
 from django.contrib.gis.geos import Point
@@ -49,6 +49,7 @@ def create_trip(request, payload: TripCreateSchema):
             400,
             "You must register your vehicle details (make/model and plate) in your profile before posting a ride.",
         )
+
     with transaction.atomic():
         trip = Trip.objects.create(
             driver=driver,
@@ -99,13 +100,22 @@ def search_trips(
     dest_lat: Optional[float] = None,
     dest_lng: Optional[float] = None,
     radius_km: float = 15.0,
+    date: Optional[str] = None,
 ):
-    # Only scheduled, future trips with open seats
+    # Only scheduled, upcoming trips with open seats
     matched_trips = Trip.objects.filter(
         status="scheduled",
         available_seats__gt=0,
         departure_time__gte=timezone.now(),
     )
+
+    # Filter by specific calendar day (YYYY-MM-DD)
+    if date:
+        try:
+            target_date = datetime.strptime(date, "%Y-%m-%d").date()
+            matched_trips = matched_trips.filter(departure_time__date=target_date)
+        except ValueError:
+            pass
 
     search_distance = D(km=radius_km)
 

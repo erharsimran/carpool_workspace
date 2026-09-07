@@ -154,6 +154,7 @@ export const api = {
         dest_lat?: number;
         dest_lng?: number;
         radius_km?: number;
+        date?: string;
     }): Promise<Trip[]> => {
         const res = await apiClient.get<Trip[]>('/trips/search', { params });
         return res.data;

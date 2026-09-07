@@ -1,4 +1,3 @@
-// src/screens/SearchScreen.tsx
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -8,6 +7,7 @@ import {
   ActivityIndicator,
   SafeAreaView,
   ScrollView,
+  Platform,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
@@ -36,16 +36,6 @@ interface RecentSearchItem {
   destCoords?: { latitude: number; longitude: number } | null;
 }
 
-const POPULAR_ROUTES = [
-  { origin: 'Cambridge', destination: 'Burlington' },
-  { origin: 'Burlington', destination: 'Cambridge' },
-  { origin: 'Cambridge', destination: 'Hamilton' },
-  { origin: 'Brampton', destination: 'Cambridge' },
-  { origin: 'Hamilton', destination: 'Cambridge' },
-  { origin: 'Toronto', destination: 'Cambridge' },
-  { origin: 'Waterloo', destination: 'Toronto' },
-];
-
 export const SearchScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const { showSuccess, showError, showWarning } = useAlert();
@@ -64,7 +54,6 @@ export const SearchScreen: React.FC = () => {
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
 
-  // Saved / Recent Searches
   const [recentSearches, setRecentSearches] = useState<RecentSearchItem[]>([]);
 
   // Booking Modal State
@@ -74,7 +63,6 @@ export const SearchScreen: React.FC = () => {
   const [selectedDropoffStopId, setSelectedDropoffStopId] = useState<number | null>(null);
   const [isBooking, setIsBooking] = useState(false);
 
-  // Load saved recent searches from AsyncStorage on mount
   useEffect(() => {
     const loadRecentSearches = async () => {
       try {
@@ -89,7 +77,6 @@ export const SearchScreen: React.FC = () => {
     loadRecentSearches();
   }, []);
 
-  // Save a search item to AsyncStorage (max 5 unique entries)
   const saveSearch = async (
     origName: string,
     dstName: string,
@@ -157,6 +144,7 @@ export const SearchScreen: React.FC = () => {
           origin_lng: origLng,
           dest_lat: destLat,
           dest_lng: destLng,
+          date: departingDate ? departingDate : undefined,
         });
         setTrips(results);
 
@@ -174,7 +162,7 @@ export const SearchScreen: React.FC = () => {
         setIsSearching(false);
       }
     },
-    [originSelected, destSelected, originQuery, destinationQuery, showError]
+    [originSelected, destSelected, originQuery, destinationQuery, departingDate, showError]
   );
 
   const handleLocationQueryChange = async (text: string, field: 'origin' | 'destination') => {
@@ -239,18 +227,6 @@ export const SearchScreen: React.FC = () => {
     );
   };
 
-  const handleSelectPopularRoute = (route: { origin: string; destination: string }) => {
-    setOriginQuery(route.origin);
-    setDestinationQuery(route.destination);
-    setOriginSelected(null);
-    setDestSelected(null);
-
-    executeSearch(
-      { name: route.origin },
-      { name: route.destination }
-    );
-  };
-
   const openBookingModal = (trip: Trip) => {
     setSelectedTrip(trip);
     setSeatsToBook(1);
@@ -309,13 +285,14 @@ export const SearchScreen: React.FC = () => {
     return Number(selectedTrip.price_per_seat);
   };
 
+  const todayStr = new Date().toISOString().split('T')[0];
+
   return (
     <SafeAreaView style={globalStyles.safeArea}>
       <ScrollView
         contentContainerStyle={[globalStyles.screenContainer, { paddingBottom: spacing.xl }]}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Banner Card */}
         <View style={heroStyles.bannerCard}>
           <View style={heroStyles.textContainer}>
             <Text style={heroStyles.title}>Find your ride</Text>
@@ -331,7 +308,6 @@ export const SearchScreen: React.FC = () => {
 
         {/* Input Fields */}
         <View style={searchFormStyles.inputContainer}>
-          {/* Origin */}
           <View style={searchFormStyles.inputField}>
             <Text style={searchFormStyles.fieldIcon}>📍</Text>
             <TextInput
@@ -354,12 +330,10 @@ export const SearchScreen: React.FC = () => {
             )}
           </View>
 
-          {/* Swap Button */}
           <TouchableOpacity style={searchFormStyles.swapBtn} onPress={handleSwapRoute}>
             <Text style={searchFormStyles.swapText}>⇅</Text>
           </TouchableOpacity>
 
-          {/* Destination */}
           <View style={searchFormStyles.inputField}>
             <Text style={searchFormStyles.fieldIcon}>📍</Text>
             <TextInput
@@ -382,19 +356,47 @@ export const SearchScreen: React.FC = () => {
             )}
           </View>
 
-          {/* Optional Date */}
+          {/* Date Picker Input */}
           <View style={searchFormStyles.inputField}>
             <Text style={searchFormStyles.fieldIcon}>📅</Text>
-            <TextInput
-              style={searchFormStyles.inputText}
-              placeholder="Departing date (optional)"
-              placeholderTextColor={colors.text.muted}
-              value={departingDate}
-              onChangeText={setDepartingDate}
-            />
+            {Platform.OS === 'web' ? (
+              <input
+                type="date"
+                min={todayStr}
+                value={departingDate}
+                onChange={(e) => setDepartingDate(e.target.value)}
+                style={{
+                  flex: 1,
+                  height: '100%',
+                  border: 'none',
+                  outline: 'none',
+                  backgroundColor: 'transparent',
+                  fontSize: 14,
+                  color: departingDate ? colors.text.primary : colors.text.muted,
+                  fontFamily: 'inherit',
+                  padding: '0 8px',
+                  cursor: 'pointer',
+                }}
+              />
+            ) : (
+              <TextInput
+                style={searchFormStyles.inputText}
+                placeholder="Departing date (YYYY-MM-DD)"
+                placeholderTextColor={colors.text.muted}
+                value={departingDate}
+                onChangeText={setDepartingDate}
+              />
+            )}
+            {departingDate.length > 0 && (
+              <TouchableOpacity
+                style={searchFormStyles.clearBtn}
+                onPress={() => setDepartingDate('')}
+              >
+                <Text style={searchFormStyles.clearText}>✕</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
-          {/* Auto-suggest dropdown */}
           {suggestions.length > 0 && (
             <View style={searchStyles.suggestionBox}>
               {suggestions.map((item) => (
@@ -411,7 +413,6 @@ export const SearchScreen: React.FC = () => {
             </View>
           )}
 
-          {/* Search Button */}
           <TouchableOpacity
             style={[searchFormStyles.darkSearchBtn, isSearching && globalStyles.btnDisabled]}
             onPress={() => executeSearch()}
@@ -425,12 +426,11 @@ export const SearchScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
-        {/* State Before User Runs a Search */}
+        {/* State Before Search: Only User's Last 5 Searches */}
         {!hasSearched ? (
           <View style={{ marginTop: spacing.sm }}>
-            {/* Recent Searches Section */}
-            {recentSearches.length > 0 && (
-              <View style={{ marginBottom: spacing.md }}>
+            {recentSearches.length > 0 ? (
+              <View>
                 <View
                   style={{
                     flexDirection: 'row',
@@ -440,11 +440,11 @@ export const SearchScreen: React.FC = () => {
                   }}
                 >
                   <Text style={[searchStyles.headerTitle, { fontSize: 14, marginBottom: 0 }]}>
-                    Recent Searches
+                    Recent Searches ({recentSearches.length})
                   </Text>
                   <TouchableOpacity onPress={handleClearRecentSearches}>
                     <Text style={{ fontSize: 12, color: colors.status.danger, fontWeight: '600' }}>
-                      Clear
+                      Clear All
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -461,23 +461,14 @@ export const SearchScreen: React.FC = () => {
                   </TouchableOpacity>
                 ))}
               </View>
-            )}
-
-            {/* Popular Routes Section */}
-            <Text style={[searchStyles.headerTitle, { fontSize: 14, marginBottom: spacing.xs }]}>
-              Popular Ontario Routes
-            </Text>
-            {POPULAR_ROUTES.map((route, index) => (
-              <TouchableOpacity
-                key={index}
-                style={routeListStyles.itemRow}
-                onPress={() => handleSelectPopularRoute(route)}
-              >
-                <Text style={routeListStyles.itemText}>
-                  {route.origin} to {route.destination}
+            ) : (
+              <View style={[searchStyles.emptyState, { paddingVertical: spacing.lg }]}>
+                <Text style={searchStyles.emptyTitle}>No recent searches</Text>
+                <Text style={searchStyles.emptySubtitle}>
+                  Enter a pickup and drop-off location above to find available rides.
                 </Text>
-              </TouchableOpacity>
-            ))}
+              </View>
+            )}
           </View>
         ) : (
           /* Search Results */
@@ -493,7 +484,7 @@ export const SearchScreen: React.FC = () => {
               <Text style={[searchStyles.headerTitle, { marginBottom: 0 }]}>Available Rides</Text>
               <TouchableOpacity onPress={() => setHasSearched(false)}>
                 <Text style={{ fontSize: 12, color: colors.primary, fontWeight: '600' }}>
-                  Back to Suggestions
+                  Back to Recent Searches
                 </Text>
               </TouchableOpacity>
             </View>
@@ -502,7 +493,7 @@ export const SearchScreen: React.FC = () => {
               <View style={searchStyles.emptyState}>
                 <Text style={searchStyles.emptyTitle}>No rides found</Text>
                 <Text style={searchStyles.emptySubtitle}>
-                  Try searching a different location or check back soon.
+                  Try searching a different location or check back later.
                 </Text>
               </View>
             ) : (
@@ -590,7 +581,6 @@ export const SearchScreen: React.FC = () => {
           <View style={[globalStyles.card, bookingModalStyles.modalCard]}>
             <Text style={bookingModalStyles.modalTitle}>Select Pick-up & Drop-off</Text>
 
-            {/* Pick-Up Stop Selector */}
             <Text style={stopStyles.selectLabel}>1. Pick-Up Location:</Text>
             <View style={stopStyles.optionPillGroup}>
               <TouchableOpacity
@@ -633,7 +623,6 @@ export const SearchScreen: React.FC = () => {
               ))}
             </View>
 
-            {/* Drop-Off Stop Selector */}
             <Text style={stopStyles.selectLabel}>2. Drop-Off Location:</Text>
             <View style={stopStyles.optionPillGroup}>
               {selectedTrip.stops?.map((stop) => (
@@ -676,7 +665,6 @@ export const SearchScreen: React.FC = () => {
               </TouchableOpacity>
             </View>
 
-            {/* Seat Selector */}
             <Text style={stopStyles.selectLabel}>Seats</Text>
             <View style={bookingModalStyles.counterRow}>
               <TouchableOpacity
@@ -696,7 +684,6 @@ export const SearchScreen: React.FC = () => {
               </TouchableOpacity>
             </View>
 
-            {/* Total Fare */}
             <View style={bookingModalStyles.fareRow}>
               <Text style={bookingModalStyles.fareLabel}>Total Price:</Text>
               <Text style={bookingModalStyles.fareAmount}>
@@ -704,7 +691,6 @@ export const SearchScreen: React.FC = () => {
               </Text>
             </View>
 
-            {/* Modal Actions */}
             <View style={bookingModalStyles.buttonRow}>
               <TouchableOpacity
                 style={[globalStyles.outlineBtn, { flex: 1, marginRight: spacing.sm }]}
