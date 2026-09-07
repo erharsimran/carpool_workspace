@@ -1,0 +1,263 @@
+// src/screens/BookingsScreen.tsx
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  View,
+  Text,
+  FlatList,
+  TouchableOpacity,
+  ActivityIndicator,
+  SafeAreaView,
+  Alert,
+  Platform,
+} from 'react-native';
+import { api, Booking } from '../services/api';
+import { useAlert } from '../context/AlertContext';
+import {
+  colors,
+  spacing,
+  globalStyles,
+  searchStyles,
+  bookingStyles,
+} from '../styles/styles';
+
+export const BookingsScreen: React.FC = () => {
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [cancellingId, setCancellingId] = useState<number | null>(null);
+
+  const { showSuccess, showError, showWarning } = useAlert();
+
+  const loadBookings = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const data = await api.getMyBookings();
+      setBookings(data || []);
+    } catch (err: any) {
+      showError(err.message || 'Failed to retrieve bookings.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [showError]);
+
+  useEffect(() => {
+    loadBookings();
+  }, [loadBookings]);
+
+  const handleCancelBooking = (booking: Booking) => {
+    if (!booking.trip?.departure_time) {
+      showError('Cannot calculate cancellation window for this booking.');
+      return;
+    }
+
+    const departureTime = new Date(booking.trip.departure_time).getTime();
+    const hoursRemaining = (departureTime - Date.now()) / (1000 * 60 * 60);
+
+    if (hoursRemaining < 5) {
+      showWarning(
+        'Cancellations are locked within 5 hours of departure per policy.',
+        'Cancellation Locked'
+      );
+      return;
+    }
+
+    const confirmMsg = `Cancel your reservation for ${booking.trip.origin_name || 'ride'} to ${booking.trip.destination_name || 'destination'}? Seats will be released immediately.`;
+
+    if (Platform.OS === 'web') {
+      if (window.confirm(confirmMsg)) {
+        proceedCancel(booking.id);
+      }
+      return;
+    }
+
+    Alert.alert('Cancel Booking', confirmMsg, [
+      { text: 'Keep Booking', style: 'cancel' },
+      {
+        text: 'Cancel Ride',
+        style: 'destructive',
+        onPress: () => proceedCancel(booking.id),
+      },
+    ]);
+  };
+
+  const proceedCancel = async (bookingId: number) => {
+    setCancellingId(bookingId);
+    try {
+      await api.cancelBooking(bookingId);
+      showSuccess('Your reservation has been cancelled.', 'Cancelled');
+      loadBookings();
+    } catch (err: any) {
+      const msg =
+        err.response?.data?.detail ||
+        err.response?.data?.message ||
+        'Unable to cancel booking.';
+      showError(msg, 'Error');
+    } finally {
+      setCancellingId(null);
+    }
+  };
+
+  const getStatusTheme = (status: Booking['status']) => {
+    switch (status) {
+      case 'confirmed':
+        return {
+          badgeStyle: bookingStyles.badgeConfirmed,
+          textColor: '#065F46',
+        };
+      case 'cancelled':
+        return {
+          badgeStyle: bookingStyles.badgeCancelled,
+          textColor: '#991B1B',
+        };
+      case 'completed':
+        return {
+          badgeStyle: bookingStyles.badgeCompleted,
+          textColor: colors.primaryDark,
+        };
+      default:
+        return {
+          badgeStyle: undefined,
+          textColor: colors.text.secondary,
+        };
+    }
+  };
+
+  return (
+    <SafeAreaView style={globalStyles.safeArea}>
+      <View style={globalStyles.screenContainer}>
+        <Text style={searchStyles.headerTitle}>My Booked Rides</Text>
+
+        <FlatList
+          data={bookings}
+          keyExtractor={(item) => item.id.toString()}
+          contentContainerStyle={{ paddingBottom: spacing.xl }}
+          refreshing={isLoading}
+          onRefresh={loadBookings}
+          ListEmptyComponent={
+            !isLoading ? (
+              <View style={searchStyles.emptyState}>
+                <Text style={searchStyles.emptyTitle}>No bookings found</Text>
+                <Text style={searchStyles.emptySubtitle}>
+                  You haven't reserved any rides across Ontario yet.
+                </Text>
+              </View>
+            ) : null
+          }
+          renderItem={({ item }) => {
+            // Defensive fallback if trip data is missing or removed
+            if (!item.trip) {
+              return (
+                <View style={globalStyles.card}>
+                  <Text style={bookingStyles.detailLabel}>
+                    Booking #{item.id} (Trip information unavailable)
+                  </Text>
+                  <Text style={searchStyles.priceAmount}>${item.total_price} CAD</Text>
+                </View>
+              );
+            }
+
+            const departureDate = item.trip.departure_time
+              ? new Date(item.trip.departure_time)
+              : null;
+
+            const hoursRemaining = departureDate
+              ? (departureDate.getTime() - Date.now()) / (1000 * 60 * 60)
+              : 0;
+
+            const isWithinLockWindow =
+              hoursRemaining < 5 && item.status === 'confirmed';
+
+            const { badgeStyle, textColor } = getStatusTheme(item.status);
+
+            return (
+              <View style={globalStyles.card}>
+                <View style={bookingStyles.headerRow}>
+                  <View style={[bookingStyles.statusBadge, badgeStyle]}>
+                    <Text style={[bookingStyles.statusBadgeText, { color: textColor }]}>
+                      {item.status}
+                    </Text>
+                  </View>
+                  <Text style={searchStyles.priceAmount}>${item.total_price} CAD</Text>
+                </View>
+
+                {/* Route */}
+                <View style={[searchStyles.routeBox, { marginVertical: spacing.xs }]}>
+                  <Text style={searchStyles.originText} numberOfLines={1}>
+                    {item.trip.origin_name || 'Origin'}
+                  </Text>
+                  <Text style={searchStyles.routeArrow}>↓</Text>
+                  <Text style={searchStyles.destinationText} numberOfLines={1}>
+                    {item.trip.destination_name || 'Destination'}
+                  </Text>
+                </View>
+
+                {/* Trip & Reservation Details */}
+                <View style={bookingStyles.detailRow}>
+                  <Text style={bookingStyles.detailLabel}>Departure</Text>
+                  <Text style={bookingStyles.detailValue}>
+                    {departureDate
+                      ? departureDate.toLocaleString('en-CA', {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: 'numeric',
+                          minute: '2-digit',
+                        })
+                      : 'TBD'}
+                  </Text>
+                </View>
+
+                <View style={bookingStyles.detailRow}>
+                  <Text style={bookingStyles.detailLabel}>Reserved Seats</Text>
+                  <Text style={bookingStyles.detailValue}>
+                    {item.seats_booked} seat{item.seats_booked !== 1 ? 's' : ''}
+                  </Text>
+                </View>
+
+                {item.trip.driver && (
+                  <View style={bookingStyles.detailRow}>
+                    <Text style={bookingStyles.detailLabel}>Driver</Text>
+                    <Text style={bookingStyles.detailValue}>
+                      {item.trip.driver.first_name || item.trip.driver.username}
+                      {item.trip.driver.vehicle_make_model
+                        ? ` (${item.trip.driver.vehicle_make_model})`
+                        : ''}
+                    </Text>
+                  </View>
+                )}
+
+                {/* 5-Hour Lock Notification */}
+                {isWithinLockWindow && (
+                  <View style={bookingStyles.lockNotice}>
+                    <Text style={bookingStyles.lockNoticeText}>
+                      Locked: Departure is in less than 5 hours. Cancellation and refund options are closed.
+                    </Text>
+                  </View>
+                )}
+
+                {/* Cancel Action Button */}
+                {item.status === 'confirmed' && (
+                  <TouchableOpacity
+                    style={[
+                      bookingStyles.cancelBtn,
+                      (isWithinLockWindow || cancellingId === item.id) &&
+                        globalStyles.btnDisabled,
+                    ]}
+                    onPress={() => handleCancelBooking(item)}
+                    disabled={isWithinLockWindow || cancellingId === item.id}
+                  >
+                    {cancellingId === item.id ? (
+                      <ActivityIndicator color={colors.status.danger} />
+                    ) : (
+                      <Text style={bookingStyles.cancelBtnText}>
+                        {isWithinLockWindow ? 'Cancellation Locked' : 'Cancel Reservation'}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                )}
+              </View>
+            );
+          }}
+        />
+      </View>
+    </SafeAreaView>
+  );
+};
